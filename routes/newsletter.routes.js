@@ -84,10 +84,10 @@ router.patch('/:id/add-submissions', protect, restrictTo('superadmin'), async (r
     const newsletter = await Newsletter.findById(req.params.id);
     if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
 
-    // Only approved submissions can be added
+    // Allow approved OR already-published submissions (for re-saving selections)
     const approved = await Submission.find({
       _id: { $in: submissionIds },
-      status: 'approved',
+      status: { $in: ['approved', 'published'] },
     });
 
     // Add to newsletter (avoid duplicates using Set)
