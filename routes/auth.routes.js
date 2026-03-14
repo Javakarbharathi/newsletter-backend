@@ -204,3 +204,31 @@ router.post('/seed-admin', async (req, res) => {
 
 
 module.exports = router;
+
+// TEMP STAFF USER FOR TESTING
+router.post('/seed-staff', async (req, res) => {
+  try {
+
+    const user = await User.create({
+      name: 'Computer Science Staff',
+      email: 'csstaff@gasc.edu',
+      password: 'Staff@123',
+      role: 'staff',
+
+      // Department ID from MongoDB
+      department: '69b4b60bf27d6669ec904c76'
+    });
+
+    res.json({
+      success: true,
+      message: 'Test staff created!',
+      login: 'csstaff@gasc.edu / Staff@123'
+    });
+
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
