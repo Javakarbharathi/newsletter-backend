@@ -1,53 +1,41 @@
 // routes/newsletter.routes.js
-// Superadmin builds and publishes newsletter issues
-
 const express    = require('express');
 const router     = express.Router();
 const Newsletter = require('../models/Newsletter');
 const Submission = require('../models/Submission');
+const Department = require('../models/Department');
 const { protect, restrictTo } = require('../middleware/auth.middleware');
 
-
-// ── POST /api/newsletters ─────────────────────────────────
-// Create a new newsletter draft — superadmin only
+// POST /api/newsletters
 router.post('/', protect, restrictTo('superadmin'), async (req, res) => {
   try {
     const { volume, issueNumber, period, startDate, endDate, principalMessage } = req.body;
-
     const newsletter = await Newsletter.create({
       volume, issueNumber, period, startDate, endDate, principalMessage,
       createdBy: req.user._id,
     });
-
     res.status(201).json({ success: true, newsletter });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
-
-// ── GET /api/newsletters ──────────────────────────────────
-// Get all newsletters
-// Viewers only see published ones; admin sees all
+// GET /api/newsletters
 router.get('/', protect, async (req, res) => {
   try {
     let filter = {};
     if (req.user.role === 'viewer') filter.status = 'published';
-
     const newsletters = await Newsletter.find(filter)
       .sort({ createdAt: -1 })
       .populate('createdBy', 'name')
       .lean();
-
     res.json({ success: true, newsletters });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-
-// ── GET /api/newsletters/:id ──────────────────────────────
-// Get full newsletter with all submissions populated
+// GET /api/newsletters/:id
 router.get('/:id', protect, async (req, res) => {
   try {
     const newsletter = await Newsletter.findById(req.params.id)
@@ -60,59 +48,44 @@ router.get('/:id', protect, async (req, res) => {
       })
       .populate('createdBy', 'name')
       .lean();
-
     if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
-
-    // Viewers can only see published
-    if (req.user.role === 'viewer' && newsletter.status !== 'published') {
+    if (req.user.role === 'viewer' && newsletter.status !== 'published')
       return res.status(403).json({ success: false, message: 'Not published yet.' });
-    }
-
     res.json({ success: true, newsletter });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-
-// ── PATCH /api/newsletters/:id/add-submissions ───────────
-// Superadmin adds approved submissions to a newsletter draft
-// Body: { submissionIds: ['id1', 'id2', ...] }
+// PATCH /api/newsletters/:id/add-submissions
 router.patch('/:id/add-submissions', protect, restrictTo('superadmin'), async (req, res) => {
   try {
     const { submissionIds } = req.body;
     const newsletter = await Newsletter.findById(req.params.id);
     if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
 
-    // Allow approved OR already-published submissions (for re-saving selections)
     const approved = await Submission.find({
       _id: { $in: submissionIds },
       status: { $in: ['approved', 'published'] },
     });
 
-    // Add to newsletter (avoid duplicates using Set)
     const existing = new Set(newsletter.submissions.map(s => s.toString()));
     for (const sub of approved) {
       if (!existing.has(sub._id.toString())) {
         newsletter.submissions.push(sub._id);
-        // Mark as published
         sub.status = 'published';
         sub.newsletterIssue = newsletter._id;
         await sub.save();
       }
     }
-
     await newsletter.save();
     res.json({ success: true, message: `${approved.length} submissions added.`, newsletter });
-
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
-
-// ── PATCH /api/newsletters/:id/publish ───────────────────
-// Publish the newsletter — makes it visible to all
+// PATCH /api/newsletters/:id/publish
 router.patch('/:id/publish', protect, restrictTo('superadmin'), async (req, res) => {
   try {
     const newsletter = await Newsletter.findByIdAndUpdate(
@@ -127,10 +100,9 @@ router.patch('/:id/publish', protect, restrictTo('superadmin'), async (req, res)
   }
 });
 
-
-// ── GET /api/newsletters/:id/preview-data ────────────────
-// Returns newsletter data structured by department
-// Used by the frontend template to auto-populate sections
+// GET /api/newsletters/:id/preview-data
+// Returns ALL departments (always shown in template),
+// with submitted+approved content merged into the ones that have content.
 router.get('/:id/preview-data', protect, async (req, res) => {
   try {
     const newsletter = await Newsletter.findById(req.params.id)
@@ -142,32 +114,33 @@ router.get('/:id/preview-data', protect, async (req, res) => {
 
     if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
 
-    // Group submissions by department for template rendering
-    const grouped = {};
+    // Fetch ALL active departments, sorted by order
+    const allDepts = await Department.find({ isActive: true })
+      .sort({ order: 1, name: 1 })
+      .lean();
+
+    // Map submissions by dept code
+    const submissionsByDept = {};
     for (const sub of newsletter.submissions) {
-      const deptCode = sub.department?.code || 'GENERAL';
-      if (!grouped[deptCode]) {
-        grouped[deptCode] = {
-          department: sub.department,
-          submissions: [],
-        };
-      }
-      grouped[deptCode].submissions.push(sub);
+      const code = sub.department?.code || 'GENERAL';
+      if (!submissionsByDept[code]) submissionsByDept[code] = [];
+      submissionsByDept[code].push(sub);
     }
 
-    // Sort departments by their order field
-    const sections = Object.values(grouped).sort(
-      (a, b) => (a.department?.order || 99) - (b.department?.order || 99)
-    );
+    // Build sections array: every department appears, with its submissions (may be empty)
+    const sections = allDepts.map(dept => ({
+      department: dept,
+      submissions: submissionsByDept[dept.code] || [],
+    }));
 
     res.json({
       success: true,
       meta: {
-        volume:     newsletter.volume,
-        issueNumber: newsletter.issueNumber,
-        period:     newsletter.period,
+        volume:           newsletter.volume,
+        issueNumber:      newsletter.issueNumber,
+        period:           newsletter.period,
         principalMessage: newsletter.principalMessage,
-        publishedAt: newsletter.publishedAt,
+        publishedAt:      newsletter.publishedAt,
       },
       sections,
     });
@@ -176,6 +149,5 @@ router.get('/:id/preview-data', protect, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
 
 module.exports = router;
