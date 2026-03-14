@@ -14,16 +14,14 @@ const app = express();
 // ── Middleware ────────────────────────────────────────────
 // CORS: allows your frontend (Netlify) to call this API
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? ['https://your-netlify-app.netlify.app'] 
-    : [
-        'http://localhost:3000',
-        'http://127.0.0.1:5500',
-        'http://127.0.0.1:5501'
-      ],
-  credentials: true,
-}));
-app.use(express.json());             // Parse JSON request bodies
+  origin: [
+    'https://delightful-stardust-4254bf.netlify.app',
+    'http://localhost:3000',
+    'http://127.0.0.1:5500',
+    'http://127.0.0.1:5501'
+  ],
+  credentials: true
+}));app.use(express.json());             // Parse JSON request bodies
 app.use(express.urlencoded({ extended: true })); // Parse form data
 
 
@@ -48,12 +46,14 @@ app.use((req, res) => {
 
 
 // ── Global Error Handler ──────────────────────────────────
-app.use(cors({
-  origin: [
-    'https://delightful-stardust-4254bf.netlify.app'
-  ],
-  credentials: true
-}));
+app.use((err, req, res, next) => {
+  console.error('Server Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal Server Error',
+  });
+});
+
 
 // ── Start Server ──────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
