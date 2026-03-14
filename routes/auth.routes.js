@@ -1,153 +1,119 @@
-// routes/newsletter.routes.js
-const express    = require('express');
-const router     = express.Router();
-const Newsletter = require('../models/Newsletter');
-const Submission = require('../models/Submission');
-const Department = require('../models/Department');
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+// routes/auth.routes.js
+// Handles: Register, Login, Get current user profile
 
-// POST /api/newsletters
-router.post('/', protect, restrictTo('superadmin'), async (req, res) => {
+const express = require('express');
+const router  = express.Router();
+const User    = require('../models/User');
+const { protect, restrictTo, generateToken } = require('../middleware/auth.middleware');
+
+
+// ── POST /api/auth/register ───────────────────────────────
+// Only superadmin can create new users
+router.post('/register', protect, restrictTo('superadmin'), async (req, res) => {
   try {
-    const { volume, issueNumber, period, startDate, endDate, principalMessage } = req.body;
-    const newsletter = await Newsletter.create({
-      volume, issueNumber, period, startDate, endDate, principalMessage,
-      createdBy: req.user._id,
+    const { name, email, password, role, department } = req.body;
+    const existing = await User.findOne({ email });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Email already registered.' });
+    }
+    const user = await User.create({ name, email, password, role, department });
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      user: { id: user._id, name: user.name, email: user.email, role: user.role },
     });
-    res.status(201).json({ success: true, newsletter });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
-// GET /api/newsletters
-router.get('/', protect, async (req, res) => {
+
+// ── POST /api/auth/login ──────────────────────────────────
+router.post('/login', async (req, res) => {
   try {
-    let filter = {};
-    if (req.user.role === 'viewer') filter.status = 'published';
-    const newsletters = await Newsletter.find(filter)
-      .sort({ createdAt: -1 })
-      .populate('createdBy', 'name')
-      .lean();
-    res.json({ success: true, newsletters });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET /api/newsletters/:id
-router.get('/:id', protect, async (req, res) => {
-  try {
-    const newsletter = await Newsletter.findById(req.params.id)
-      .populate({
-        path: 'submissions',
-        populate: [
-          { path: 'department', select: 'name code type order' },
-          { path: 'submittedBy', select: 'name' },
-        ],
-      })
-      .populate('createdBy', 'name')
-      .lean();
-    if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
-    if (req.user.role === 'viewer' && newsletter.status !== 'published')
-      return res.status(403).json({ success: false, message: 'Not published yet.' });
-    res.json({ success: true, newsletter });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// PATCH /api/newsletters/:id/add-submissions
-router.patch('/:id/add-submissions', protect, restrictTo('superadmin'), async (req, res) => {
-  try {
-    const { submissionIds } = req.body;
-    const newsletter = await Newsletter.findById(req.params.id);
-    if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
-
-    const approved = await Submission.find({
-      _id: { $in: submissionIds },
-      status: { $in: ['approved', 'published'] },
-    });
-
-    const existing = new Set(newsletter.submissions.map(s => s.toString()));
-    for (const sub of approved) {
-      if (!existing.has(sub._id.toString())) {
-        newsletter.submissions.push(sub._id);
-        sub.status = 'published';
-        sub.newsletterIssue = newsletter._id;
-        await sub.save();
-      }
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'Please provide email and password.' });
     }
-    await newsletter.save();
-    res.json({ success: true, message: `${approved.length} submissions added.`, newsletter });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-});
-
-// PATCH /api/newsletters/:id/publish
-router.patch('/:id/publish', protect, restrictTo('superadmin'), async (req, res) => {
-  try {
-    const newsletter = await Newsletter.findByIdAndUpdate(
-      req.params.id,
-      { status: 'published', publishedAt: new Date() },
-      { new: true }
-    );
-    if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
-    res.json({ success: true, message: 'Newsletter published!', newsletter });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET /api/newsletters/:id/preview-data
-// Returns ALL departments (always shown in template),
-// with submitted+approved content merged into the ones that have content.
-router.get('/:id/preview-data', protect, async (req, res) => {
-  try {
-    const newsletter = await Newsletter.findById(req.params.id)
-      .populate({
-        path: 'submissions',
-        populate: { path: 'department', select: 'name code type order' },
-      })
-      .lean();
-
-    if (!newsletter) return res.status(404).json({ success: false, message: 'Newsletter not found.' });
-
-    // Fetch ALL active departments, sorted by order
-    const allDepts = await Department.find({ isActive: true })
-      .sort({ order: 1, name: 1 })
-      .lean();
-
-    // Map submissions by dept code
-    const submissionsByDept = {};
-    for (const sub of newsletter.submissions) {
-      const code = sub.department?.code || 'GENERAL';
-      if (!submissionsByDept[code]) submissionsByDept[code] = [];
-      submissionsByDept[code].push(sub);
+    const user = await User.findOne({ email }).select('+password').populate('department', 'name code type');
+    if (!user || !user.isActive) {
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
-
-    // Build sections array: every department appears, with its submissions (may be empty)
-    const sections = allDepts.map(dept => ({
-      department: dept,
-      submissions: submissionsByDept[dept.code] || [],
-    }));
-
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+    }
+    const token = generateToken(user._id);
     res.json({
       success: true,
-      meta: {
-        volume:           newsletter.volume,
-        issueNumber:      newsletter.issueNumber,
-        period:           newsletter.period,
-        principalMessage: newsletter.principalMessage,
-        publishedAt:      newsletter.publishedAt,
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        department: user.department,
       },
-      sections,
     });
-
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+
+// ── GET /api/auth/me ──────────────────────────────────────
+router.get('/me', protect, async (req, res) => {
+  res.json({ success: true, user: req.user });
+});
+
+
+// ── GET /api/auth/users ───────────────────────────────────
+router.get('/users', protect, restrictTo('superadmin'), async (req, res) => {
+  try {
+    const users = await User.find().populate('department', 'name code').lean();
+    res.json({ success: true, count: users.length, users });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// ── PUT /api/auth/users/:id ───────────────────────────────
+router.put('/users/:id', protect, restrictTo('superadmin'), async (req, res) => {
+  try {
+    const { name, role, department, isActive } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { name, role, department, isActive },
+      { new: true, runValidators: true }
+    ).populate('department', 'name code');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+    res.json({ success: true, user });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+
+// ── POST /api/auth/seed-admin ─────────────────────────────
+// ONE-TIME ONLY — creates first superadmin. Delete after use.
+router.post('/seed-admin', async (req, res) => {
+  try {
+    const existing = await User.findOne({ role: 'superadmin' });
+    if (existing) {
+      return res.status(400).json({ message: 'Admin already exists. This route is disabled.' });
+    }
+    const admin = await User.create({
+      name: 'Principal Admin',
+      email: 'admin@gasc.edu',
+      password: 'Admin@123',
+      role: 'superadmin',
+    });
+    res.json({ success: true, message: 'Admin created! Login: admin@gasc.edu / Admin@123' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 
 module.exports = router;
