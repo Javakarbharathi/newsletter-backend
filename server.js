@@ -48,14 +48,12 @@ app.use((req, res) => {
 
 
 // ── Global Error Handler ──────────────────────────────────
-app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || 'Internal Server Error',
-  });
-});
-
+app.use(cors({
+  origin: [
+    'https://delightful-stardust-4254bf.netlify.app'
+  ],
+  credentials: true
+}));
 
 // ── Start Server ──────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
