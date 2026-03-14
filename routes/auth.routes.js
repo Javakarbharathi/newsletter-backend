@@ -202,9 +202,6 @@ router.post('/seed-admin', async (req, res) => {
   }
 });
 
-
-module.exports = router;
-
 // TEMP STAFF USER FOR TESTING
 router.post('/seed-staff', async (req, res) => {
   try {
@@ -232,3 +229,6 @@ router.post('/seed-staff', async (req, res) => {
     });
   }
 });
+
+module.exports = router;
+
