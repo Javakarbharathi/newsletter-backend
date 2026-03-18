@@ -95,7 +95,7 @@ router.put('/users/:id', protect, restrictTo('superadmin'), async (req, res) => 
 });
 
 
-// ── POST /api/auth/seed-admin ─────────────────────────────
+// ── POST /api/auth/seed-admin ────────────────────────────-
 // ONE-TIME ONLY — creates first superadmin. Delete after use.
 router.post('/seed-admin', async (req, res) => {
   try {
