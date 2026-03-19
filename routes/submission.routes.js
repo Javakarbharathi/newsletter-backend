@@ -11,20 +11,23 @@ const { upload, deleteImage }  = require('../utils/cloudinary');
 // ── POST /api/submissions ─────────────────────────────────
 // Staff creates a new submission with optional photos
 // upload.array('photos', 5) allows up to 5 photos
+// ── POST /api/submissions ──
 router.post('/', protect, restrictTo('staff', 'coordinator', 'superadmin'), upload.array('photos', 5), async (req, res) => {
   try {
-    let { photoCaptions } = req.body;
+    // 1. FIX: You must extract ALL these fields from req.body
+    let { title, description, category, eventDate, photoCaptions } = req.body;
 
-    // Force captions to be an array even if only one is sent
+    // 2. Caption Logic (Step 2 Fix)
     if (typeof photoCaptions === 'string') photoCaptions = [photoCaptions];
 
     const photos = (req.files || []).map((file, index) => ({
       url: file.path,
       publicId: file.filename,
-      caption: photoCaptions ? photoCaptions[index] : '', // Match by index
+      caption: photoCaptions ? photoCaptions[index] : '', 
     }));
-    // ... rest of the create logic
 
+    // 3. Create the submission
+    // These variables (title, description, etc.) now exist because of line 19 above
     const submission = await Submission.create({
       title,
       description,
@@ -41,6 +44,7 @@ router.post('/', protect, restrictTo('staff', 'coordinator', 'superadmin'), uplo
     res.status(201).json({ success: true, submission });
 
   } catch (error) {
+    // This sends the "title is not defined" error back to the frontend
     res.status(400).json({ success: false, message: error.message });
   }
 });
