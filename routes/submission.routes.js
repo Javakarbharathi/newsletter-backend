@@ -13,14 +13,17 @@ const { upload, deleteImage }  = require('../utils/cloudinary');
 // upload.array('photos', 5) allows up to 5 photos
 router.post('/', protect, restrictTo('staff', 'coordinator', 'superadmin'), upload.array('photos', 5), async (req, res) => {
   try {
-    const { title, description, category, eventDate, photoCaptions } = req.body;
+    let { photoCaptions } = req.body;
 
-    // Build photos array from uploaded files
+    // Force captions to be an array even if only one is sent
+    if (typeof photoCaptions === 'string') photoCaptions = [photoCaptions];
+
     const photos = (req.files || []).map((file, index) => ({
-      url:      file.path,              // Cloudinary URL
-      publicId: file.filename,          // Cloudinary public_id
-      caption:  photoCaptions?.[index] || '',
+      url: file.path,
+      publicId: file.filename,
+      caption: photoCaptions ? photoCaptions[index] : '', // Match by index
     }));
+    // ... rest of the create logic
 
     const submission = await Submission.create({
       title,
